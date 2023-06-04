@@ -8,7 +8,7 @@ import com.ontotext.trree.sdk.StatementIterator
 const val EXPLICIT = "explicit"
 
 class ExplainIterator(
-    val reificationId: Long,
+    public val reificationId: Long,
     statement: Statement,
     private val statementProperties: StatementProperties,
     private val requestContext: ProofContext

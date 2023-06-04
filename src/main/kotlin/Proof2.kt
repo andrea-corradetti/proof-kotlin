@@ -44,54 +44,8 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
     }
 
     override fun preprocess(request: Request?): RequestContext {
-        val requestContext = ProofContext()
-        requestContext.request = request
-
-        if (request != null) {
-            val options = request.options
-            if (options != null && options is SystemPluginOptions) {
-                options.getOption(Option.ACCESS_INFERENCER).let {
-                    if (it is AbstractInferencer) {
-                        requestContext.inferencer = it
-                    }
-                }
-
-                options.getOption(Option.ACCESS_REPOSITORY_CONNECTION).let {
-                    if (it is AbstractRepositoryConnection) {
-                        requestContext.repositoryConnection = it
-                    }
-                }
-            }
-        }
-        return requestContext
+        return ProofContext(request)
     }
-
-
-    override fun getName(): String {
-        return "proof2"
-    }
-
-    override fun setDataDir(p0: File?) {
-//        TODO("Not yet implemented")
-    }
-
-    override fun setLogger(logger: Logger?) {
-        this.logger = logger
-    }
-
-
-    override fun setFingerprint(p0: Long) {
-//        TODO("Not yet implemented")
-    }
-
-    override fun getFingerprint(): Long {
-        return 1L //TODO choose an actual not made up fingerprint
-    }
-
-    override fun shutdown(p0: ShutdownReason?) {
-//        TODO("Not yet implemented")
-    }
-
 
 
     override fun estimate(p0: Long, p1: Long, p2: Long, p3: Long, p4: PluginConnection?, p5: RequestContext?): Double {
@@ -115,71 +69,84 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
         }
 
         if (predicateId == explainId) {
-            return getExplainIteratorForStatement(
+            val explainIterator = getExplainIteratorForStatement(
                 quotedStatementId = objectId, contextId, requestContext, pluginConnection
-            )
-        } else {
-            val iter = requestContext.attributes["$ITER-$subjectId"] as? ExplainIterator
-            val currentSolution = iter?.currentSolution ?: return StatementIterator.EMPTY
-
-            when (predicateId) {
-                hasRuleId -> {
-                    val ruleId = pluginConnection.entities.put(literal(currentSolution.rule), Entities.Scope.REQUEST)
-                    return StatementIterator.create(iter.reificationId, hasRuleId, ruleId, DEFAULT_GRAPH) //TODO check if default graph is the correct context
-                }
-
-                hasSubjectId -> {
-                    if (objectId.isBound() && objectId != iter.subject) { //TODO not sure why the second check is meaningful
-                        return StatementIterator.EMPTY
-                    }
-                    return StatementIterator.create(iter.reificationId, hasSubjectId, iter.subject, DEFAULT_GRAPH)
-                }
-
-                hasPredicateId -> {
-                    if (objectId.isBound() && objectId != iter.predicate) { //TODO not sure why the second check is meaningful
-                        return StatementIterator.EMPTY
-                    }
-                    return StatementIterator.create(iter.reificationId, hasPredicateId, iter.predicate, DEFAULT_GRAPH)
-                }
-
-                hasObjectId -> {
-                    if (objectId.isBound() && objectId != iter.`object`) { //TODO not sure why the second check is meaningful
-                        return StatementIterator.EMPTY
-                    }
-                    return StatementIterator.create(iter.reificationId, hasObjectId, iter.`object`, DEFAULT_GRAPH)
-                }
-
-                hasContextId -> {
-                    if (objectId.isBound() && objectId != iter.context) { //TODO not sure why the second check is meaningful
-                        return StatementIterator.EMPTY
-                    }
-                    return StatementIterator.create(iter.reificationId, hasContextId, iter.`object`, DEFAULT_GRAPH)
-                }
-
-                else -> StatementIterator.EMPTY
-            }
+            ) ?: return StatementIterator.EMPTY
+            requestContext.iterators["$ITER-${explainIterator.reificationId}"] = explainIterator
+            return explainIterator
         }
 
-
+        return getExplainIteratorForPredicate(subjectId, predicateId, objectId, requestContext, pluginConnection)
     }
 
     private fun getExplainIteratorForStatement(
         quotedStatementId: Long, contextId: Long, requestContext: ProofContext, pluginConnection: PluginConnection
-    ): StatementIterator {
-        val repoConn = requestContext.repositoryConnection
+    ): ExplainIterator? {
         val entities = pluginConnection.entities
-        val objectValue = entities[quotedStatementId] as? Triple ?: return StatementIterator.EMPTY
+        val objectValue = entities[quotedStatementId] as? Triple ?: return null
         val quotedSubjectId = entities.put(objectValue.subject, Entities.Scope.SYSTEM)
         val quotedPredicateId = entities.put(objectValue.predicate, Entities.Scope.SYSTEM)
         val quotedObjectId = entities.put(objectValue.predicate, Entities.Scope.SYSTEM)
 
-        val reificationId = pluginConnection.entities.put(bnode(), Entities.Scope.REQUEST)
+        val reificationId = entities.put(bnode(), Entities.Scope.REQUEST)
         val statement = Statement(quotedSubjectId, quotedPredicateId, quotedObjectId, contextId)
-        val statementProperties = repoConn.getStatementProperties(statement)
-        val explainIterator = ExplainIterator(reificationId, statement, statementProperties, requestContext)
-        requestContext.attributes["$ITER-$reificationId"] = explainIterator
+        val statementProperties = requestContext.repositoryConnection.getStatementProperties(statement)
 
-        return explainIterator
+        return ExplainIterator(reificationId, statement, statementProperties, requestContext)
+    }
+
+
+    private fun getExplainIteratorForPredicate(
+        subjectId: Long,
+        predicateId: Long,
+        objectId: Long,
+        requestContext: ProofContext,
+        pluginConnection: PluginConnection
+    ): StatementIterator {
+        val iter = requestContext.iterators["$ITER-$subjectId"] as? ExplainIterator
+        val currentSolution = iter?.currentSolution ?: return StatementIterator.EMPTY
+
+        when (predicateId) {
+            hasRuleId -> {
+                val ruleId = pluginConnection.entities.put(literal(currentSolution.rule), Entities.Scope.REQUEST)
+                return StatementIterator.create(
+                    iter.reificationId,
+                    hasRuleId,
+                    ruleId,
+                    DEFAULT_GRAPH
+                ) //TODO check if default graph is the correct context
+            }
+
+            hasSubjectId -> {
+                if (objectId.isBound() && objectId != iter.subject) {
+                    return StatementIterator.EMPTY
+                }
+                return StatementIterator.create(iter.reificationId, hasSubjectId, iter.subject, DEFAULT_GRAPH)
+            }
+
+            hasPredicateId -> {
+                if (objectId.isBound() && objectId != iter.predicate) {
+                    return StatementIterator.EMPTY
+                }
+                return StatementIterator.create(iter.reificationId, hasPredicateId, iter.predicate, DEFAULT_GRAPH)
+            }
+
+            hasObjectId -> {
+                if (objectId.isBound() && objectId != iter.`object`) {
+                    return StatementIterator.EMPTY
+                }
+                return StatementIterator.create(iter.reificationId, hasObjectId, iter.`object`, DEFAULT_GRAPH)
+            }
+
+            hasContextId -> {
+                if (objectId.isBound() && objectId != iter.context) {
+                    return StatementIterator.EMPTY
+                }
+                return StatementIterator.create(iter.reificationId, hasContextId, iter.context, DEFAULT_GRAPH)
+            }
+
+            else -> return StatementIterator.EMPTY
+        }
     }
 
 
@@ -209,6 +176,32 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
     ): StatementProperties {
         return this.getStatementProperties(statement.subj, statement.pred, statement.obj, statement.ctx)
     }
+
+    override fun getName(): String {
+        return "proof2"
+    }
+
+    override fun setDataDir(p0: File?) {
+//        TODO("Not yet implemented")
+    }
+
+    override fun setLogger(logger: Logger?) {
+        this.logger = logger
+    }
+
+
+    override fun setFingerprint(p0: Long) {
+//        TODO("Not yet implemented")
+    }
+
+    override fun getFingerprint(): Long {
+        return 1L //TODO choose an actual not made up fingerprint
+    }
+
+    override fun shutdown(p0: ShutdownReason?) {
+//        TODO("Not yet implemented")
+    }
+
 
 }
 
