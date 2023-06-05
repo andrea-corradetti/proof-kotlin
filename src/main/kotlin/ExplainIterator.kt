@@ -1,5 +1,6 @@
 import com.ontotext.trree.AbstractRepositoryConnection
 import com.ontotext.trree.ReportSupportedSolution
+import com.ontotext.trree.StatementIdIterator
 import com.ontotext.trree.SystemGraphs
 import com.ontotext.trree.query.QueryResultIterator
 import com.ontotext.trree.query.StatementSource
@@ -55,23 +56,7 @@ class ExplainIterator(
 
                 while (resultIterator.hasNext()) {
                     val currentResult = resultIterator.next()
-                    connection.getStatements(
-                        currentResult.subj,
-                        currentResult.pred,
-                        currentResult.obj,
-                        true,
-                        0,  //TODO figure out wtf is this
-                        contextMask
-                    ).use { iter ->
-                        while (iter.hasNext()) {
-                            if (iter.context != SystemGraphs.EXPLICIT_GRAPH.id.toLong()) {
-                                currentResult.context = iter.context
-                                currentResult.status = iter.status
-                                break
-                            }
-                            iter.next()
-                        }
-                    }
+                    updateContextAndStatusIfExplicit(currentResult)
 
                     val isSelfReferential =
                         this.subject == currentResult.subj && this.predicate == currentResult.pred && this.`object` == currentResult.obj //TODO consider adding context, refactor to different constructor
@@ -96,6 +81,26 @@ class ExplainIterator(
             queryResult.next()
         }
         return false
+    }
+
+    private fun updateContextAndStatusIfExplicit(currentResult: StatementIdIterator) {
+        connection.getStatements(
+            currentResult.subj,
+            currentResult.pred,
+            currentResult.obj,
+            true,
+            0,  //TODO figure out wtf is this
+            contextMask
+        ).use { iter ->
+            while (iter.hasNext()) {
+                if (iter.context != SystemGraphs.EXPLICIT_GRAPH.id.toLong()) {
+                    currentResult.context = iter.context
+                    currentResult.status = iter.status
+                    break
+                }
+                iter.next()
+            }
+        }
     }
 
 
