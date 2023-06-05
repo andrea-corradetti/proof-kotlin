@@ -56,7 +56,7 @@ class ExplainIterator(
 
                 while (resultIterator.hasNext()) {
                     val currentResult = resultIterator.next()
-                    updateContextAndStatusIfExplicit(currentResult)
+                    updateContextAndStatusIfInGraph(currentResult)
 
                     val isSelfReferential =
                         this.subject == currentResult.subj && this.predicate == currentResult.pred && this.`object` == currentResult.obj //TODO consider adding context, refactor to different constructor
@@ -83,7 +83,7 @@ class ExplainIterator(
         return false
     }
 
-    private fun updateContextAndStatusIfExplicit(currentResult: StatementIdIterator) {
+    private fun updateContextAndStatusIfInGraph(currentResult: StatementIdIterator) {
         connection.getStatements(
             currentResult.subj,
             currentResult.pred,
