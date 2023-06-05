@@ -19,6 +19,7 @@ class ProofContext(request: Request?) : RequestContext {
 
     init {
         setRequest(request)
+
         val options = request?.options
         if (options != null && options is SystemPluginOptions) {
             options.getOption(SystemPluginOptions.Option.ACCESS_INFERENCER).let {
@@ -26,7 +27,6 @@ class ProofContext(request: Request?) : RequestContext {
                     inferencer = it
                 }
             }
-
             options.getOption(SystemPluginOptions.Option.ACCESS_REPOSITORY_CONNECTION).let {
                 if (it is AbstractRepositoryConnection) {
                     repositoryConnection = it
@@ -34,9 +34,5 @@ class ProofContext(request: Request?) : RequestContext {
             }
         }
     }
-}
 
-
-enum class NamedInferenceContextKey(val key: String) {
-    GRAPH_NAMES("graphNames")
 }

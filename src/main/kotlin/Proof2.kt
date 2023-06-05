@@ -1,8 +1,6 @@
-import com.ontotext.trree.AbstractInferencer
 import com.ontotext.trree.AbstractRepositoryConnection
 import com.ontotext.trree.StatementIdIterator
 import com.ontotext.trree.sdk.*
-import com.ontotext.trree.sdk.SystemPluginOptions.Option
 import org.eclipse.rdf4j.model.Triple
 import org.eclipse.rdf4j.model.util.Values.*
 import org.slf4j.Logger
@@ -13,21 +11,21 @@ const val ITER = "iter"
 const val UNBOUND = 0L
 const val DEFAULT_GRAPH = 0L
 
-const val explicitStatus = //TODO possibly wrong name
+const val contextMask = //TODO name is copied from original proof plugin
     (StatementIdIterator.DELETED_STATEMENT_STATUS or StatementIdIterator.SKIP_ON_BROWSE_STATEMENT_STATUS or StatementIdIterator.INFERRED_STATEMENT_STATUS) //Copied this from the old proof plugin. No documentation on what each flag does
 
 
 class Proof2 : Plugin, Preprocessor, PatternInterpreter {
-    private val conjBaseUri = "https://w3id.org/conjectures/"
-    private val namespace = "http://www.ontotext.com/proof/"
-    private val proofExplainIri = iri(namespace + "explain")
+    private val namespace = "http://example.com/proof/"
+    private val explainIri = iri(namespace + "explain")
+    private val fromRuleIri = iri(namespace + "fromRule")
     private val hasSubjectIri = iri(namespace + "hasSubject")
     private val hasPredicateIri = iri(namespace + "hasPredicate")
     private val hasObjectIri = iri(namespace + "hasObject")
     private val hasContextIri = iri(namespace + "hasContext")
 
     private var explainId by Delegates.notNull<Long>()
-    private var hasRuleId by Delegates.notNull<Long>()
+    private var fromRuleId by Delegates.notNull<Long>()
     private var hasSubjectId by Delegates.notNull<Long>()
     private var hasPredicateId by Delegates.notNull<Long>()
     private var hasObjectId by Delegates.notNull<Long>()
@@ -36,7 +34,8 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
     private var logger: Logger? = null
 
     override fun initialize(initReason: InitReason, pluginConnection: PluginConnection) {
-        explainId = pluginConnection.entities.put(proofExplainIri, Entities.Scope.SYSTEM)
+        explainId = pluginConnection.entities.put(explainIri, Entities.Scope.SYSTEM)
+        fromRuleId = pluginConnection.entities.put(fromRuleIri, Entities.Scope.SYSTEM)
         hasSubjectId = pluginConnection.entities.put(hasSubjectIri, Entities.Scope.SYSTEM)
         hasPredicateId = pluginConnection.entities.put(hasPredicateIri, Entities.Scope.SYSTEM)
         hasObjectId = pluginConnection.entities.put(hasObjectIri, Entities.Scope.SYSTEM)
@@ -48,8 +47,16 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
     }
 
 
-    override fun estimate(p0: Long, p1: Long, p2: Long, p3: Long, p4: PluginConnection?, p5: RequestContext?): Double {
-        TODO("Not yet implemented")
+    override fun estimate(
+        subjectId: Long,
+        predicateId: Long,
+        objectId: Long,
+        contextId: Long,
+        pluginConnection: PluginConnection,
+        requestContext: RequestContext?
+    ): Double {
+        //TODO finish this
+        return 0.0
     }
 
     override fun interpret(
@@ -61,29 +68,34 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
         requestContext: RequestContext?
     ): StatementIterator {
         if (requestContext !is ProofContext) {
+            logger?.warn("Request context is not ProofContext")
             return StatementIterator.EMPTY
         }
 
         if (!requestContext.inferencer.inferStatementsFlag) {
+            logger?.warn("inferStatementsFlag is ${requestContext.inferencer.inferStatementsFlag}")
             return StatementIterator.EMPTY
         }
+
+        logger?.info("Subject$subjectId, predicate $predicateId, object $objectId, context $contextId")
 
         if (predicateId == explainId) {
             val explainIterator = getExplainIteratorForStatement(
                 quotedStatementId = objectId, contextId, requestContext, pluginConnection
             ) ?: return StatementIterator.EMPTY
             requestContext.iterators["$ITER-${explainIterator.reificationId}"] = explainIterator
+            logger?.info("Proof2 has handled a statement")
             return explainIterator
         }
 
-        return getExplainIteratorForPredicate(subjectId, predicateId, objectId, requestContext, pluginConnection)
+        return getExplainIteratorForPredicate(subjectId, predicateId, objectId, requestContext, pluginConnection).also { logger?.info("Proof2 has handled a predicate") }
     }
 
     private fun getExplainIteratorForStatement(
         quotedStatementId: Long, contextId: Long, requestContext: ProofContext, pluginConnection: PluginConnection
     ): ExplainIterator? {
         val entities = pluginConnection.entities
-        val objectValue = entities[quotedStatementId] as? Triple ?: return null
+        val objectValue = entities.get(quotedStatementId) as? Triple ?: run {logger?.info("Object is ${entities[quotedStatementId]}"); return null}
         val quotedSubjectId = entities.put(objectValue.subject, Entities.Scope.SYSTEM)
         val quotedPredicateId = entities.put(objectValue.predicate, Entities.Scope.SYSTEM)
         val quotedObjectId = entities.put(objectValue.predicate, Entities.Scope.SYSTEM)
@@ -103,15 +115,16 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
         requestContext: ProofContext,
         pluginConnection: PluginConnection
     ): StatementIterator {
-        val iter = requestContext.iterators["$ITER-$subjectId"] as? ExplainIterator
+        val iter = requestContext.iterators["$ITER-$subjectId"]
         val currentSolution = iter?.currentSolution ?: return StatementIterator.EMPTY
 
+
         when (predicateId) {
-            hasRuleId -> {
+            fromRuleId -> {
                 val ruleId = pluginConnection.entities.put(literal(currentSolution.rule), Entities.Scope.REQUEST)
                 return StatementIterator.create(
                     iter.reificationId,
-                    hasRuleId,
+                    fromRuleId,
                     ruleId,
                     DEFAULT_GRAPH
                 ) //TODO check if default graph is the correct context
@@ -162,10 +175,11 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
     private fun AbstractRepositoryConnection.getStatementProperties(
         subjectId: Long, predicateId: Long, objectId: Long, contextId: Long
     ): StatementProperties {
-        this.getStatements(subjectId, predicateId, objectId, contextId, explicitStatus).use { iter ->
+        this.getStatements(subjectId, predicateId, objectId, contextId, contextMask).use { iter ->
+            val isExplicit = iter.hasNext()
             return StatementProperties(
-                isExplicit = iter.hasNext(),
-                context = iter.context,
+                isExplicit,
+                context = if (isExplicit) iter.context else DEFAULT_GRAPH,
                 isDerivedFromSameAs = (iter.status and StatementIdIterator.SKIP_ON_REINFER_STATEMENT_STATUS) != 0 //taken from the old proof plugin. No idea why it works
             )
         }
@@ -206,7 +220,7 @@ class Proof2 : Plugin, Preprocessor, PatternInterpreter {
 }
 
 
-public data class StatementProperties(val isExplicit: Boolean, val context: Long, val isDerivedFromSameAs: Boolean)
+data class StatementProperties(val isExplicit: Boolean, val context: Long, val isDerivedFromSameAs: Boolean)
 
 
 

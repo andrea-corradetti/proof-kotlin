@@ -8,7 +8,7 @@ import com.ontotext.trree.sdk.StatementIterator
 const val EXPLICIT = "explicit"
 
 class ExplainIterator(
-    public val reificationId: Long,
+    val reificationId: Long,
     statement: Statement,
     private val statementProperties: StatementProperties,
     private val requestContext: ProofContext
@@ -16,20 +16,19 @@ class ExplainIterator(
     ReportSupportedSolution {
 
     private val solutions = mutableListOf<Solution>()
-    private lateinit var solutionsIterator: Iterator<Solution>
+    private val solutionsIterator: Iterator<Solution>
 
-    public var currentSolution: Solution? = null
+    var currentSolution: Solution? = null
 
 
     init {
         if (statementProperties.isExplicit) {
             solutions.add(Solution(rule = EXPLICIT, premises = mutableSetOf(statement)))
-            solutionsIterator = solutions.iterator()
         } else {
+            solutions.clear()
             requestContext.inferencer.isSupported(statement.subj, statement.pred, statement.obj, statement.ctx, 0, this)
-
-            //TODO finish this
         }
+        solutionsIterator = solutions.iterator()
 
     }
 
@@ -61,8 +60,8 @@ class ExplainIterator(
                         currentResult.pred,
                         currentResult.obj,
                         true,
-                        0,
-                        explicitStatus
+                        0,  //TODO figure out wtf is this
+                        contextMask
                     ).use { iter ->
                         while (iter.hasNext()) {
                             if (iter.context != SystemGraphs.EXPLICIT_GRAPH.id.toLong()) {
@@ -94,7 +93,7 @@ class ExplainIterator(
 
 
             }
-
+            queryResult.next()
         }
         return false
     }
@@ -105,6 +104,25 @@ class ExplainIterator(
 
     override fun getConnection(): AbstractRepositoryConnection = requestContext.repositoryConnection
 
+
+}
+
+
+class Solution(val rule: String, val premises: MutableSet<Statement>) {
+    override fun toString(): String {
+        var string = "rule:$rule\n"
+        premises.forEachIndexed { index, p ->
+            string += "{$index}:${p.subj}, ${p.pred}, ${p.obj}, ${p.ctx}\n"
+        }
+        return string
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (other !is Solution)
+            return false
+
+        return this.rule == other.rule && this.premises == other.premises
+    }
 
 }
 
@@ -156,24 +174,6 @@ class Statement(values: LongArray) {
             return false
 
         return (subj == other.subj) && (pred == other.pred) && (obj == other.obj) && (status == other.status)
-    }
-
-}
-
-class Solution(val rule: String, val premises: MutableSet<Statement>) {
-    override fun toString(): String {
-        var string = "rule:$rule\n"
-        premises.forEachIndexed { index, p ->
-            string += "{$index}:${p.subj}, ${p.pred}, ${p.obj}, ${p.ctx}\n"
-        }
-        return string
-    }
-
-    override fun equals(other: Any?): Boolean {
-        if (other !is Solution)
-            return false
-
-        return this.rule == other.rule && this.premises == other.premises
     }
 
 }
